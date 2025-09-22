@@ -1,3 +1,4 @@
+// server.js
 import "dotenv/config.js";
 import express from "express";
 import cors from "cors";
@@ -14,63 +15,74 @@ import path from "path";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// security & logs
+// ==========================
+// ✅ Security & logging
+// ==========================
 app.use(helmet());
 app.use(morgan("dev"));
+
+// ==========================
+// ✅ CORS setup
+// ==========================
+const allowedOrigins = [
+  "https://winnystudios-backend-8.onrender.com", // dev
+  process.env.CLIENT_ORIGIN, // frontend (Vercel)
+].filter(Boolean); // remove undefined values
+
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS: " + origin));
+      }
+    },
     credentials: true,
   })
 );
 
-// serve uploads statically with CORS
+// ==========================
+// ✅ Serve uploads
+// ==========================
 app.use(
   "/uploads",
   cors({
-    origin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
+    origin: allowedOrigins,
     credentials: true,
   }),
   express.static(path.join(process.cwd(), "uploads"))
 );
 
-// ✅ parsers first
+// ==========================
+// ✅ Parsers
+// ==========================
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// routes
+// ==========================
+// ✅ Routes
+// ==========================
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
-
-// rate limit orders
 app.use(
   "/api/orders",
   rateLimit({ windowMs: 60 * 1000, limit: 30 }),
   orderRoutes
 );
 
+// Test route
 app.get("/", (_req, res) => res.send("✅ API OK"));
 
+// ==========================
+// ✅ Error handling
+// ==========================
 app.use(notFound);
 app.use(errorHandler);
 
+// ==========================
+// ✅ Start server
+// ==========================
 connectDB(process.env.MONGO_URI).then(() => {
-  app.listen(PORT, () =>
-    console.log(`🚀 Server running on http://192.168.0.110:${PORT}`)
-  );
-});
-
-// Handle 404 - Not Found
-app.use((req, res, next) => {
-  res.status(404).json({ error: "Route not found" });
-});
-
-// Global Error Handler
-app.use((err, req, res, next) => {
-  console.error("❌ Global Error:", err.stack);
-
-  res.status(err.statusCode || 500).json({
-    error: err.message || "Server error",
-    stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
-  });
+  app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 });
