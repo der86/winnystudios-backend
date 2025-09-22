@@ -16,6 +16,11 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // ==========================
+// ✅ Trust proxy (important for Render/Vercel/Heroku)
+// ==========================
+app.set("trust proxy", 1); // trust first proxy so rate-limit works properly
+
+// ==========================
 // ✅ Security & logging
 // ==========================
 app.use(helmet());
@@ -26,33 +31,37 @@ app.use(morgan("dev"));
 // ==========================
 const allowedOrigins = [
   "http://localhost:5173",
-  "https://winnystudios-frontend.vercel.app", // your main frontend
+  "https://winnystudios-frontend.vercel.app",
+  "https://winnystudios-frontend-5fhytuneg-dericks-projects-9a303bd7.vercel.app", // production
   process.env.CLIENT_ORIGIN, // optional custom domain
 ].filter(Boolean);
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // allow Postman/cURL
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true); // allow Postman/cURL
 
-    if (allowedOrigins.includes(origin) || /\.vercel\.app$/.test(origin)) {
-      callback(null, true);
-    } else {
-      console.error("❌ CORS blocked:", origin);
-      callback(new Error("Not allowed by CORS: " + origin));
-    }
-  },
-  credentials: true,
-};
-
-// Apply globally
-app.use(cors(corsOptions));
+      // ✅ Allow preview builds on *.vercel.app
+      if (allowedOrigins.includes(origin) || /\.vercel\.app$/.test(origin)) {
+        callback(null, true);
+      } else {
+        console.error("❌ CORS blocked:", origin);
+        callback(new Error("Not allowed by CORS: " + origin));
+      }
+    },
+    credentials: true,
+  })
+);
 
 // ==========================
 // ✅ Serve uploads
 // ==========================
 app.use(
   "/uploads",
-  cors(corsOptions),
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  }),
   express.static(path.join(process.cwd(), "uploads"))
 );
 
