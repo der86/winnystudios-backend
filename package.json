@@ -16,7 +16,8 @@
   },
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "vitest"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
