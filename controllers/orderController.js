@@ -18,18 +18,65 @@ const orderSchema = z.object({
   items: z.array(orderItemSchema).min(1),
 });
 
+// ---------------- Helpers ----------------
+const buildErrorResponse = (res, status, message, details = null) => {
+  const payload = { success: false, error: message };
+  if (details) payload.details = details;
+  return res.status(status).json(payload);
+};
+
+const sendOrderNotification = async (order, user) => {
+  const itemsText = order.items
+    .map((i) => `• ${i.name} x${i.qty ?? 1} — ${i.price}`)
+    .join("\n");
+
+  await sendOrderEmail({
+    to: process.env.EMAIL_TO,
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    subject: "🛍️ New Order Received",
+    text: `
+New order received:
+Customer: ${user.name} (${user.email})
+Phone: ${order.customer.phone}
+Address: ${order.customer.address}
+Notes: ${order.customer.notes || "None"}
+
+Items:
+${itemsText}
+
+Total: $${order.total}
+    `,
+    html: `
+      <h2>New Order</h2>
+      <p><b>Name:</b> ${user.name}</p>
+      <p><b>Email:</b> ${user.email}</p>
+      <p><b>Phone:</b> ${order.customer.phone}</p>
+      <p><b>Address:</b> ${order.customer.address}</p>
+      <p><b>Notes:</b> ${order.customer.notes || "None"}</p>
+      <h3>Items</h3>
+      <ul>
+        ${order.items
+          .map(
+            (i) =>
+              `<li>${i.name} x${i.qty ?? 1} — $${i.price * (i.qty ?? 1)}</li>`
+          )
+          .join("")}
+      </ul>
+      <p><b>Total:</b> $${order.total}</p>
+    `,
+  });
+};
+
 // ---------------- Create New Order ----------------
 export const createOrder = async (req, res, next) => {
   try {
     const parsed = orderSchema.parse(req.body);
 
-    // calculate total
     const total = parsed.items.reduce(
       (sum, i) => sum + i.price * (i.qty ?? 1),
       0
     );
 
-    // create order in DB
     const order = await Order.create({
       user: req.user._id,
       customer: {
@@ -43,58 +90,19 @@ export const createOrder = async (req, res, next) => {
       total,
     });
 
-    // send notification email (optional)
-    try {
-      const itemsText = parsed.items
-        .map((i) => `• ${i.name} x${i.qty ?? 1} — ${i.price}`)
-        .join("\n");
+    // fire-and-forget email (don’t block response)
+    sendOrderNotification(order, req.user).catch((err) =>
+      console.error("⚠️ Email not sent:", err.message)
+    );
 
-      await sendOrderEmail({
-        to: process.env.EMAIL_TO,
-        from: process.env.EMAIL_FROM || process.env.SMTP_USER,
-        subject: "🛍️ New Order Received",
-        text: `
-New order received:
-Customer: ${req.user.name} (${req.user.email})
-Phone: ${parsed.phone}
-Address: ${parsed.address}
-Notes: ${parsed.notes || "None"}
-
-Items:
-${itemsText}
-
-Total: ${total}
-        `,
-        html: `
-          <h2>New Order</h2>
-          <p><b>Name:</b> ${req.user.name}</p>
-          <p><b>Email:</b> ${req.user.email}</p>
-          <p><b>Phone:</b> ${parsed.phone}</p>
-          <p><b>Address:</b> ${parsed.address}</p>
-          <p><b>Notes:</b> ${parsed.notes || "None"}</p>
-          <h3>Items</h3>
-          <ul>
-            ${parsed.items
-              .map(
-                (i) =>
-                  `<li>${i.name} x${i.qty ?? 1} — $${i.price * (i.qty ?? 1)}</li>`
-              )
-              .join("")}
-          </ul>
-          <p><b>Total:</b> $${total}</p>
-        `,
-      });
-    } catch (mailErr) {
-      console.error("⚠️ Email not sent:", mailErr.message);
-    }
-
-    res.status(201).json(order);
+    res.status(201).json({
+      success: true,
+      message: "Order created successfully",
+      data: order,
+    });
   } catch (err) {
     if (err?.issues) {
-      return res.status(400).json({
-        error: "Validation failed",
-        details: err.issues,
-      });
+      return buildErrorResponse(res, 400, "Validation failed", err.issues);
     }
     console.error("❌ Error creating order:", err.message);
     next(err);
@@ -107,10 +115,10 @@ export const getMyOrders = async (req, res) => {
     const orders = await Order.find({ user: req.user._id }).sort({
       createdAt: -1,
     });
-    res.json(orders);
+    res.json({ success: true, data: orders });
   } catch (err) {
     console.error("❌ Failed to fetch user orders:", err.message);
-    res.status(500).json({ error: "Failed to fetch orders" });
+    buildErrorResponse(res, 500, "Failed to fetch orders");
   }
 };
 
@@ -118,44 +126,50 @@ export const getMyOrders = async (req, res) => {
 export const getAllOrders = async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 });
-    res.json(orders);
+    res.json({ success: true, data: orders });
   } catch (err) {
     console.error("❌ Failed to fetch all orders:", err.message);
-    res.status(500).json({ error: "Failed to fetch all orders" });
+    buildErrorResponse(res, 500, "Failed to fetch all orders");
   }
 };
 
 export const getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
-    if (!order) return res.status(404).json({ error: "Order not found" });
-    res.json(order);
+    if (!order) return buildErrorResponse(res, 404, "Order not found");
+    res.json({ success: true, data: order });
   } catch (err) {
     console.error("❌ Failed to fetch order:", err.message);
-    res.status(500).json({ error: "Failed to fetch order" });
+    buildErrorResponse(res, 500, "Failed to fetch order");
   }
 };
 
 export const updateOrder = async (req, res) => {
   try {
-    const order = await Order.findByIdAndUpdate(req.params.id, req.body, {
+    // ✅ Only allow status & notes update
+    const allowedUpdates = (({ status, notes }) => ({ status, notes }))(
+      req.body
+    );
+
+    const order = await Order.findByIdAndUpdate(req.params.id, allowedUpdates, {
       new: true,
     });
-    if (!order) return res.status(404).json({ error: "Order not found" });
-    res.json(order);
+
+    if (!order) return buildErrorResponse(res, 404, "Order not found");
+    res.json({ success: true, message: "Order updated", data: order });
   } catch (err) {
     console.error("❌ Failed to update order:", err.message);
-    res.status(500).json({ error: "Failed to update order" });
+    buildErrorResponse(res, 500, "Failed to update order");
   }
 };
 
 export const deleteOrder = async (req, res) => {
   try {
     const order = await Order.findByIdAndDelete(req.params.id);
-    if (!order) return res.status(404).json({ error: "Order not found" });
-    res.json({ message: "Order deleted" });
+    if (!order) return buildErrorResponse(res, 404, "Order not found");
+    res.json({ success: true, message: "Order deleted" });
   } catch (err) {
     console.error("❌ Failed to delete order:", err.message);
-    res.status(500).json({ error: "Failed to delete order" });
+    buildErrorResponse(res, 500, "Failed to delete order");
   }
 };
