@@ -1,4 +1,5 @@
 // controllers/orderController.js
+import User from "../models/User.js";
 import { z } from "zod";
 import Order from "../models/Order.js";
 import { sendOrderEmail } from "../utils/mailer.js";
