@@ -24,17 +24,22 @@ app.use(morgan("dev"));
 // ==========================
 // ✅ CORS setup
 // ==========================
-const allowedOrigins = [
-  "http://localhost:5173", // dev
-  process.env.CLIENT_ORIGIN, // frontend (Vercel)
-].filter(Boolean); // remove undefined values
-
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin) return callback(null, true); // allow Postman/cURL
+
+      const allowedOrigins = [
+        "http://localhost:5173",
+        "https://winnystudios-frontend-5fhytuneg-dericks-projects-9a303bd7.vercel.app", // main production
+        process.env.CLIENT_ORIGIN, // optional custom domain
+      ].filter(Boolean);
+
+      // ✅ Allow preview builds on *.vercel.app
+      if (allowedOrigins.includes(origin) || /\.vercel\.app$/.test(origin)) {
         callback(null, true);
       } else {
+        console.error("❌ CORS blocked:", origin);
         callback(new Error("Not allowed by CORS: " + origin));
       }
     },
