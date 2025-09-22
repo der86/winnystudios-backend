@@ -24,38 +24,35 @@ app.use(morgan("dev"));
 // ==========================
 // ✅ CORS setup
 // ==========================
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true); // allow Postman/cURL
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://winnystudios-frontend.vercel.app", // your main frontend
+  process.env.CLIENT_ORIGIN, // optional custom domain
+].filter(Boolean);
 
-      const allowedOrigins = [
-        "http://localhost:5173",
-        "https://winnystudios-frontend-5fhytuneg-dericks-projects-9a303bd7.vercel.app", // main production
-        process.env.CLIENT_ORIGIN, // optional custom domain
-      ].filter(Boolean);
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true); // allow Postman/cURL
 
-      // ✅ Allow preview builds on *.vercel.app
-      if (allowedOrigins.includes(origin) || /\.vercel\.app$/.test(origin)) {
-        callback(null, true);
-      } else {
-        console.error("❌ CORS blocked:", origin);
-        callback(new Error("Not allowed by CORS: " + origin));
-      }
-    },
-    credentials: true,
-  })
-);
+    if (allowedOrigins.includes(origin) || /\.vercel\.app$/.test(origin)) {
+      callback(null, true);
+    } else {
+      console.error("❌ CORS blocked:", origin);
+      callback(new Error("Not allowed by CORS: " + origin));
+    }
+  },
+  credentials: true,
+};
+
+// Apply globally
+app.use(cors(corsOptions));
 
 // ==========================
 // ✅ Serve uploads
 // ==========================
 app.use(
   "/uploads",
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-  }),
+  cors(corsOptions),
   express.static(path.join(process.cwd(), "uploads"))
 );
 
