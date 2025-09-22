@@ -25,7 +25,7 @@ app.use(morgan("dev"));
 // ✅ CORS setup
 // ==========================
 const allowedOrigins = [
-  "https://winnystudios-backend-8.onrender.com", // dev
+  "http://localhost:5173", // dev
   process.env.CLIENT_ORIGIN, // frontend (Vercel)
 ].filter(Boolean); // remove undefined values
 
