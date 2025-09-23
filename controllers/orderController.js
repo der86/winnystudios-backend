@@ -106,13 +106,28 @@ export const createOrder = async (req, res) => {
 // ---------------- Get Logged-in User Orders ----------------
 export const getMyOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ user: req.user._id }).sort({
-      createdAt: -1,
+    const orders = await Order.find({ user: req.user._id })
+      .sort({ createdAt: -1 })
+      .lean(); // lean() for faster response
+
+    if (!orders || orders.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No orders found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: orders,
     });
-    res.json({ success: true, data: orders });
   } catch (err) {
-    console.error("❌ Failed to fetch user orders:", err.message);
-    buildErrorResponse(res, 500, "Failed to fetch orders");
+    console.error("❌ Failed to fetch user orders:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch orders",
+      error: err.message,
+    });
   }
 };
 
