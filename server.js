@@ -16,7 +16,7 @@ import uploadRoutes from "./routes/uploadRoutes.js";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use("/api/upload", uploadRoutes);
+app.use("/api/uploadRoutes", uploadRoutes);
 
 // ==========================
 // ✅ Trust proxy (important for Render/Vercel/Heroku)
@@ -35,6 +35,7 @@ app.use(morgan("dev"));
 const allowedOrigins = [
   "http://localhost:5173",
   "https://winnystudios-frontend.vercel.app",
+  "https://winnystudios.com",
   "https://winnystudios-frontend-5fhytuneg-dericks-projects-9a303bd7.vercel.app", // production
   process.env.CLIENT_ORIGIN, // optional custom domain
 ].filter(Boolean);
