@@ -11,7 +11,7 @@ import { notFound, errorHandler } from "./middleware/errorHandler.js";
 import productRoutes from "./routes/productRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import path from "path";
-import uploadRoutes from "./routes/upload.js";
+import uploadRoutes from "./routes/uploadRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
