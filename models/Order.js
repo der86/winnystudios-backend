@@ -7,6 +7,7 @@ const OrderItemSchema = new mongoose.Schema(
     name: { type: String, required: true },
     price: { type: Number, required: true },
     qty: { type: Number, default: 1 },
+    image: { type: String }, // ✅ Cloudinary image URL
   },
   { _id: false }
 );
@@ -19,8 +20,8 @@ const OrderSchema = new mongoose.Schema(
       required: true, // ✅ every order must be linked to a user
     },
     customer: {
-      name: { type: String, required: true },   // ✅ new
-      email: { type: String, required: true },  // ✅ new
+      name: { type: String, required: true },
+      email: { type: String, required: true },
       phone: { type: String, required: true },
       address: { type: String, required: true },
       notes: { type: String },

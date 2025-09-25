@@ -1,8 +1,9 @@
 // controllers/orderController.js
 import User from "../models/User.js";
-import { z } from "zod";
 import Order from "../models/Order.js";
+import { z } from "zod";
 import { sendOrderEmail } from "../utils/mailer.js";
+import { v2 as cloudinary } from "cloudinary";
 
 // ---------------- Validation ----------------
 const orderItemSchema = z.object({
@@ -10,7 +11,7 @@ const orderItemSchema = z.object({
   name: z.string().min(1),
   price: z.number().nonnegative(),
   qty: z.number().int().positive().default(1),
-  images: z.array(z.string().url()).optional(), // ✅ allow Cloudinary URLs
+  image: z.string().optional(), // raw base64, file path, or Cloudinary URL
 });
 
 const orderSchema = z.object({
@@ -18,7 +19,7 @@ const orderSchema = z.object({
   address: z.string().min(5),
   notes: z.string().optional().nullable(),
   items: z.array(orderItemSchema).min(1),
-  total: z.number().positive(), // ✅ ensure valid total
+  total: z.number().nonnegative(),
 });
 
 // ---------------- Helpers ----------------
@@ -30,7 +31,12 @@ const buildErrorResponse = (res, status, message, details = null) => {
 
 const sendOrderNotification = async (order, user) => {
   const itemsText = order.items
-    .map((i) => `• ${i.name} x${i.qty ?? 1} — ${i.price}`)
+    .map(
+      (i) =>
+        `• ${i.name} x${i.qty ?? 1} — $${i.price * (i.qty ?? 1)} ${
+          i.image ? ` (📸 ${i.image})` : ""
+        }`
+    )
     .join("\n");
 
   await sendOrderEmail({
@@ -44,8 +50,7 @@ Address: ${order.customer.address}
 Notes: ${order.customer.notes || "None"}
 Items:
 ${itemsText}
-Total: $${order.total}
-    `,
+Total: $${order.total}`,
     html: `
       <h2>New Order</h2>
       <p><b>Name:</b> ${user.name}</p>
@@ -57,14 +62,12 @@ Total: $${order.total}
       <ul>
         ${order.items
           .map(
-            (i) => `<li>
-              ${i.name} x${i.qty ?? 1} — $${i.price * (i.qty ?? 1)}
-              ${
-                i.images?.length
-                  ? `<br/><img src="${i.images[0]}" width="60"/>`
+            (i) =>
+              `<li>${i.name} x${i.qty ?? 1} — $${i.price * (i.qty ?? 1)}${
+                i.image
+                  ? `<br><img src="${i.image}" width="100" style="margin-top:5px"/>`
                   : ""
-              }
-            </li>`
+              }</li>`
           )
           .join("")}
       </ul>
@@ -76,24 +79,38 @@ Total: $${order.total}
 // ---------------- Create New Order ----------------
 export const createOrder = async (req, res) => {
   try {
-    // ✅ Validate with Zod
-    const parsed = orderSchema.safeParse(req.body);
-    if (!parsed.success) {
+    const parseResult = orderSchema.safeParse(req.body);
+    if (!parseResult.success) {
       return buildErrorResponse(
         res,
         400,
-        "Validation failed",
-        parsed.error.errors
+        "Invalid order data",
+        parseResult.error.errors
       );
     }
 
-    const { items, total, phone, address, notes } = parsed.data;
+    let { items, total, phone, address, notes } = parseResult.data;
 
-    // ✅ Get logged-in user
-    const user = await User.findById(req.user.id);
-    if (!user) {
-      return res.status(401).json({ error: "User not found" });
-    }
+    // ✅ Upload any raw/base64 images to Cloudinary
+    const uploadedItems = await Promise.all(
+      items.map(async (item) => {
+        if (item.image && !item.image.startsWith("http")) {
+          try {
+            const uploadRes = await cloudinary.uploader.upload(item.image, {
+              folder: "orders",
+            });
+            item.image = uploadRes.secure_url;
+          } catch (err) {
+            console.error("❌ Cloudinary upload failed:", err.message);
+          }
+        }
+        return item;
+      })
+    );
+
+    // ✅ Get logged-in user details
+    const user = await User.findById(req.user._id);
+    if (!user) return buildErrorResponse(res, 401, "User not found");
 
     const order = new Order({
       user: user._id,
@@ -104,15 +121,14 @@ export const createOrder = async (req, res) => {
         address,
         notes,
       },
-      items,
+      items: uploadedItems,
       total,
     });
 
     await order.save();
-    // Optionally send email
-    // await sendOrderNotification(order, user);
+    await sendOrderNotification(order, user); // send email after saving
 
-    res.status(201).json(order);
+    res.status(201).json({ success: true, data: order });
   } catch (err) {
     console.error("❌ Order creation error:", err);
     res.status(500).json({ error: "Server error" });
@@ -126,18 +142,16 @@ export const getMyOrders = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    if (!orders || orders.length === 0) {
-      return res.status(200).json({ success: true, data: [] }); // ✅ avoid 404
+    if (!orders.length) {
+      return res
+        .status(404)
+        .json({ success: false, message: "No orders found" });
     }
 
     res.status(200).json({ success: true, data: orders });
   } catch (err) {
     console.error("❌ Failed to fetch user orders:", err);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch orders",
-      error: err.message,
-    });
+    res.status(500).json({ success: false, message: "Failed to fetch orders" });
   }
 };
 
