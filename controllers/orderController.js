@@ -10,6 +10,7 @@ const orderItemSchema = z.object({
   name: z.string().min(1),
   price: z.number().nonnegative(),
   qty: z.number().int().positive().default(1),
+  images: z.array(z.string().url()).optional(), // ✅ allow Cloudinary URLs
 });
 
 const orderSchema = z.object({
@@ -17,6 +18,7 @@ const orderSchema = z.object({
   address: z.string().min(5),
   notes: z.string().optional().nullable(),
   items: z.array(orderItemSchema).min(1),
+  total: z.number().positive(), // ✅ ensure valid total
 });
 
 // ---------------- Helpers ----------------
@@ -35,16 +37,13 @@ const sendOrderNotification = async (order, user) => {
     to: process.env.EMAIL_TO,
     from: process.env.EMAIL_FROM || process.env.SMTP_USER,
     subject: "🛍️ New Order Received",
-    text: `
-New order received:
+    text: `New order received:
 Customer: ${user.name} (${user.email})
 Phone: ${order.customer.phone}
 Address: ${order.customer.address}
 Notes: ${order.customer.notes || "None"}
-
 Items:
 ${itemsText}
-
 Total: $${order.total}
     `,
     html: `
@@ -58,8 +57,14 @@ Total: $${order.total}
       <ul>
         ${order.items
           .map(
-            (i) =>
-              `<li>${i.name} x${i.qty ?? 1} — $${i.price * (i.qty ?? 1)}</li>`
+            (i) => `<li>
+              ${i.name} x${i.qty ?? 1} — $${i.price * (i.qty ?? 1)}
+              ${
+                i.images?.length
+                  ? `<br/><img src="${i.images[0]}" width="60"/>`
+                  : ""
+              }
+            </li>`
           )
           .join("")}
       </ul>
@@ -71,13 +76,20 @@ Total: $${order.total}
 // ---------------- Create New Order ----------------
 export const createOrder = async (req, res) => {
   try {
-    const { items, total, customer } = req.body;
-
-    if (!items || items.length === 0) {
-      return res.status(400).json({ error: "No items in order" });
+    // ✅ Validate with Zod
+    const parsed = orderSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return buildErrorResponse(
+        res,
+        400,
+        "Validation failed",
+        parsed.error.errors
+      );
     }
 
-    // ✅ Get logged-in user details
+    const { items, total, phone, address, notes } = parsed.data;
+
+    // ✅ Get logged-in user
     const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(401).json({ error: "User not found" });
@@ -86,41 +98,39 @@ export const createOrder = async (req, res) => {
     const order = new Order({
       user: user._id,
       customer: {
-        name: user.name, // auto-filled
-        email: user.email, // auto-filled
-        phone: customer.phone,
-        address: customer.address,
-        notes: customer.notes,
+        name: user.name,
+        email: user.email,
+        phone,
+        address,
+        notes,
       },
       items,
       total,
     });
 
     await order.save();
+    // Optionally send email
+    // await sendOrderNotification(order, user);
+
     res.status(201).json(order);
   } catch (err) {
     console.error("❌ Order creation error:", err);
     res.status(500).json({ error: "Server error" });
   }
 };
+
 // ---------------- Get Logged-in User Orders ----------------
 export const getMyOrders = async (req, res) => {
   try {
     const orders = await Order.find({ user: req.user._id })
       .sort({ createdAt: -1 })
-      .lean(); // lean() for faster response
+      .lean();
 
     if (!orders || orders.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No orders found",
-      });
+      return res.status(200).json({ success: true, data: [] }); // ✅ avoid 404
     }
 
-    res.status(200).json({
-      success: true,
-      data: orders,
-    });
+    res.status(200).json({ success: true, data: orders });
   } catch (err) {
     console.error("❌ Failed to fetch user orders:", err);
     res.status(500).json({
@@ -155,15 +165,12 @@ export const getOrderById = async (req, res) => {
 
 export const updateOrder = async (req, res) => {
   try {
-    // ✅ Only allow status & notes update
     const allowedUpdates = (({ status, notes }) => ({ status, notes }))(
       req.body
     );
-
     const order = await Order.findByIdAndUpdate(req.params.id, allowedUpdates, {
       new: true,
     });
-
     if (!order) return buildErrorResponse(res, 404, "Order not found");
     res.json({ success: true, message: "Order updated", data: order });
   } catch (err) {
