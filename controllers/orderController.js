@@ -2,8 +2,11 @@
 import User from "../models/User.js";
 import Order from "../models/Order.js";
 import { z } from "zod";
-import { sendOrderEmail } from "../utils/mailer.js";
 import { v2 as cloudinary } from "cloudinary";
+import sgMail from "@sendgrid/mail";
+
+// ---------------- Setup SendGrid ----------------
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // ---------------- Validation ----------------
 const orderItemSchema = z.object({
@@ -29,28 +32,24 @@ const buildErrorResponse = (res, status, message, details = null) => {
   return res.status(status).json(payload);
 };
 
+// ---------------- Email Notifications ----------------
 const sendOrderNotification = async (order, user) => {
-  const itemsText = order.items
+  const itemsHtml = order.items
     .map(
       (i) =>
-        `• ${i.name} x${i.qty ?? 1} — $${i.price * (i.qty ?? 1)} ${
-          i.image ? ` (📸 ${i.image})` : ""
-        }`
+        `<li>${i.name} x${i.qty ?? 1} — $${i.price * (i.qty ?? 1)}${
+          i.image
+            ? `<br><img src="${i.image}" width="100" style="margin-top:5px"/>`
+            : ""
+        }</li>`
     )
-    .join("\n");
+    .join("");
 
-  await sendOrderEmail({
+  // ---------------- Admin Email ----------------
+  await sgMail.send({
     to: process.env.EMAIL_TO,
-    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    from: process.env.EMAIL_FROM, // must be verified in SendGrid
     subject: "🛍️ New Order Received",
-    text: `New order received:
-Customer: ${user.name} (${user.email})
-Phone: ${order.customer.phone}
-Address: ${order.customer.address}
-Notes: ${order.customer.notes || "None"}
-Items:
-${itemsText}
-Total: $${order.total}`,
     html: `
       <h2>New Order</h2>
       <p><b>Name:</b> ${user.name}</p>
@@ -59,19 +58,26 @@ Total: $${order.total}`,
       <p><b>Address:</b> ${order.customer.address}</p>
       <p><b>Notes:</b> ${order.customer.notes || "None"}</p>
       <h3>Items</h3>
-      <ul>
-        ${order.items
-          .map(
-            (i) =>
-              `<li>${i.name} x${i.qty ?? 1} — $${i.price * (i.qty ?? 1)}${
-                i.image
-                  ? `<br><img src="${i.image}" width="100" style="margin-top:5px"/>`
-                  : ""
-              }</li>`
-          )
-          .join("")}
-      </ul>
+      <ul>${itemsHtml}</ul>
       <p><b>Total:</b> $${order.total}</p>
+    `,
+  });
+
+  // ---------------- Customer Confirmation ----------------
+  await sgMail.send({
+    to: user.email,
+    from: process.env.EMAIL_FROM,
+    subject: "✅ Your order has been placed!",
+    html: `
+      <h2>Thank you for your order, ${user.name}!</h2>
+      <p>We’ve received your order and will process it soon.</p>
+      <h3>Your Items</h3>
+      <ul>${itemsHtml}</ul>
+      <p><b>Total:</b> $${order.total}</p>
+      <p><b>Delivery Address:</b> ${order.customer.address}</p>
+      <p><b>Phone:</b> ${order.customer.phone}</p>
+      <br/>
+      <p>Best regards,<br/>The Winnystudios Team</p>
     `,
   });
 };
@@ -91,7 +97,7 @@ export const createOrder = async (req, res) => {
 
     let { items, total, phone, address, notes } = parseResult.data;
 
-    // ✅ Upload any raw/base64 images to Cloudinary
+    // ✅ Upload images to Cloudinary if not already URLs
     const uploadedItems = await Promise.all(
       items.map(async (item) => {
         if (item.image && !item.image.startsWith("http")) {
@@ -108,7 +114,7 @@ export const createOrder = async (req, res) => {
       })
     );
 
-    // ✅ Get logged-in user details
+    // ✅ Get logged-in user
     const user = await User.findById(req.user._id);
     if (!user) return buildErrorResponse(res, 401, "User not found");
 
@@ -126,7 +132,7 @@ export const createOrder = async (req, res) => {
     });
 
     await order.save();
-    await sendOrderNotification(order, user); // send email after saving
+    await sendOrderNotification(order, user);
 
     res.status(201).json({ success: true, data: order });
   } catch (err) {
