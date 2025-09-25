@@ -16,8 +16,6 @@ import uploadRoutes from "./routes/uploadRoutes.js";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use("/api/uploadRoutes", uploadRoutes);
-
 // ==========================
 // ✅ Trust proxy (important for Render/Vercel/Heroku)
 // ==========================
@@ -78,7 +76,9 @@ app.use(express.urlencoded({ extended: true }));
 // ==========================
 // ✅ Routes
 // ==========================
+
 app.use("/api/auth", authRoutes);
+app.use("/api/uploadRoutes", uploadRoutes);
 app.use("/api/products", productRoutes);
 app.use(
   "/api/orders",
