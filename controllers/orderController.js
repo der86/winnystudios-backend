@@ -59,7 +59,7 @@ const sendOrderNotification = async (order, user) => {
       <p><b>Notes:</b> ${order.customer.notes || "None"}</p>
       <h3>Items</h3>
       <ul>${itemsHtml}</ul>
-      <p><b>Total:</b> $${order.total}</p>
+      <p><b>Total:</b> ksh${order.total}</p>
     `,
   });
 
@@ -73,7 +73,7 @@ const sendOrderNotification = async (order, user) => {
       <p>We’ve received your order and will process it soon.</p>
       <h3>Your Items</h3>
       <ul>${itemsHtml}</ul>
-      <p><b>Total:</b> $${order.total}</p>
+      <p><b>Total:</b> ksh${order.total}</p>
       <p><b>Delivery Address:</b> ${order.customer.address}</p>
       <p><b>Phone:</b> ${order.customer.phone}</p>
       <br/>
